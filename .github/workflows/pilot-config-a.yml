@@ -213,13 +213,47 @@ jobs:
           cat results/meta.json
           echo "=== files captured ==="
           find results -type f | sort
-          echo "=== metrics.txt (the per-stage measurements) ==="
-          cat results/eco-ci-raw/metrics.txt 2>/dev/null || echo "(absent)"
 
-          # Fail LOUDLY on an empty measurement. A silently empty capture would
+          # ECO-CI does not write a metrics file. Every measurement is stored in
+          # its variable file as ECO_CI_MEASUREMENT_<n>_{LABEL,CPU_AVG,ENERGY,
+          # POWER_AVG,TIME}. That store is parsed here into one tidy CSV row per
+          # stage, so the 153 runs concatenate directly into an analysis dataset.
+          VARS=results/eco-ci-raw/vars.sh
+          echo "=== ECO-CI measurement variables ==="
+          grep -E '^(export[[:space:]]+)?ECO_CI_MEASUREMENT_' "$VARS" || echo "(none found)"
+
+          getvar() {
+            grep -m1 -E "^(export[[:space:]]+)?$1=" "$VARS" 2>/dev/null \
+              | sed -E "s/^(export[[:space:]]+)?$1=//" \
+              | sed -E "s/^[\"']//; s/[\"']$//"
+          }
+
+          echo "config,run_id,run_number,cpu_model,stage_index,label,cpu_avg_pct,energy_j,power_avg_w,duration_s" > results/measurements.csv
+          CPU="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+          i=1
+          while [ -n "$(getvar "ECO_CI_MEASUREMENT_${i}_LABEL")" ]; do
+            printf '%s,%s,%s,"%s",%s,%s,%s,%s,%s,%s\n' \
+              "A" \
+              "${{ github.run_id }}" \
+              "${{ github.run_number }}" \
+              "$CPU" \
+              "$i" \
+              "$(getvar "ECO_CI_MEASUREMENT_${i}_LABEL")" \
+              "$(getvar "ECO_CI_MEASUREMENT_${i}_CPU_AVG")" \
+              "$(getvar "ECO_CI_MEASUREMENT_${i}_ENERGY")" \
+              "$(getvar "ECO_CI_MEASUREMENT_${i}_POWER_AVG")" \
+              "$(getvar "ECO_CI_MEASUREMENT_${i}_TIME")" \
+              >> results/measurements.csv
+            i=$((i + 1))
+          done
+
+          echo "=== measurements.csv ==="
+          cat results/measurements.csv
+
+          # Fail LOUDLY on an empty capture. Silently empty results would
           # otherwise be discovered only after all 153 runs had been collected.
-          if [ ! -s results/eco-ci-raw/metrics.txt ]; then
-            echo "::error::No ECO-CI measurements captured (results/eco-ci-raw/metrics.txt missing or empty). Do not collect data until this is fixed."
+          if [ "$(wc -l < results/measurements.csv)" -lt 2 ]; then
+            echo "::error::No ECO-CI measurements parsed from $VARS. Do not collect data until this is fixed."
             exit 1
           fi
 
