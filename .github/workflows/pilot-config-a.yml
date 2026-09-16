@@ -20,10 +20,9 @@ permissions:
   contents: read
 
 env:
-  # The subject application is HELD CONSTANT. Every run in the experiment must
-  # measure identical code, so the checkout is pinned to this commit and not to
-  # a moving branch. Do not change this once data collection begins.
-  SUBJECT_SHA: 402946f2127a21b2e5315dd340d176eeb328f085
+  # Upstream commit this fork was taken from, for the record. Re-pin the
+  # checkout to a frozen SHA before data collection begins (see notes).
+  UPSTREAM_SHA: 402946f2127a21b2e5315dd340d176eeb328f085
   # Deterministic environment (controls: timezone + locale).
   TZ: UTC
   LANG: C.UTF-8
@@ -47,11 +46,18 @@ jobs:
           echo "Timezone: $(date +%Z)"
           echo "Started:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-      - name: Clone repository (pinned commit)
+      - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.SUBJECT_SHA }}
           persist-credentials: false
+
+      # The subject application must be IDENTICAL in every run. Rather than
+      # asserting that, every run prints the commit it actually measured, so
+      # constancy across all 153 runs can be verified from the logs.
+      - name: Log measured commit
+        run: |
+          echo "SUBJECT COMMIT: $(git rev-parse HEAD)"
+          echo "SUBJECT TREE:   $(git rev-parse HEAD:src)"
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -82,8 +88,20 @@ jobs:
       # "npm run lint && npm run test:vi" - it chains lint INSIDE test, which
       # would make Config C (lint removed) and Config E (lint parallel to test)
       # impossible to express. The granular scripts keep the stages separable.
+      # `npm run lint` = eslint . && tsc --noEmit && biome check .
+      # `eslint .` walks into website/, a SECOND npm project whose deps root
+      # `npm ci` does not install, so it dies on `astro/tsconfigs/strict`.
+      # Upstream works around this by installing and building the whole docs
+      # site first - irrelevant work for this experiment, and it would make the
+      # install/build stages measure the docs site instead of the library.
+      # The subject application is the cheerio LIBRARY, so eslint is scoped to
+      # it. tsc already excludes website/ (tsconfig.json "exclude"); biome does
+      # not resolve imports, so both run unchanged.
       - name: Lint
-        run: npm run lint
+        run: |
+          npx eslint . --ignore-pattern "website/**"
+          npm run lint:ts
+          npm run lint:biome
 
       - name: ECO-CI - measure lint
         uses: green-coding-solutions/eco-ci-energy-estimation@v5
@@ -115,12 +133,29 @@ jobs:
           send-data: false
 
       # ================= STAGE 5: DEPLOY =================
-      # cheerio is a library, so "deploy" is publication packaging rather than
-      # a server release. `npm pack` performs the real packaging work (prepack
-      # hooks, file selection, tarball creation) without publishing anything.
-      # This is a known scope limitation - record it in threats-to-validity.
-      - name: Deploy (publication packaging)
+      # cheerio is a library, so "deploy" is publication rather than a server
+      # release. The stage is therefore two real operations:
+      #   1. `npm pack`  - packaging work (prepack hooks, file selection, tarball)
+      #   2. upload      - transfer of that tarball to a remote artefact store
+      # Together these are what a library pipeline genuinely does on release.
+      # Nothing is published to npm, so the run has no external side effect.
+      # LIMITATION: this is publication, not deployment to a server. The deploy
+      # stage's energy SHARE is therefore not generalisable to server-deploying
+      # pipelines. Record in threats-to-validity. It does not affect H1-H4,
+      # because the stage is identical in all five configurations.
+      - name: Deploy (package)
         run: npm pack
+
+      - name: Deploy (upload artefact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheerio-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: '*.tgz'
+          # Controls: fixed compression effort and retention, so the upload
+          # does the same amount of work in every run.
+          compression-level: 6
+          retention-days: 1
+          if-no-files-found: error
 
       - name: ECO-CI - measure deploy
         uses: green-coding-solutions/eco-ci-energy-estimation@v5
