@@ -67,6 +67,11 @@ jobs:
         with:
           task: start-measurement
           send-data: false
+          # MUST be set HERE. ECO-CI reads json-output only in start-measurement
+          # (it is passed to setup.sh); setting it on display-results is silently
+          # ignored, and then /tmp/eco-ci/total-data.json is never written and
+          # the data-total-json / data-lap-json outputs come back EMPTY.
+          json-output: true
 
       # ================= STAGE 1: INSTALL =================
       - name: Install dependencies
@@ -159,7 +164,6 @@ jobs:
         with:
           task: display-results
           send-data: false
-          json-output: true
 
       # ECO-CI writes its results table to the job log ONLY. Across 153 runs a
       # log is not a dataset, so the measurement JSON and this run's control
@@ -202,6 +206,23 @@ jobs:
           echo "=== eco-total.json (first 600 chars) ==="
           head -c 600 results/eco-total.json || true
           echo
+
+          # Fail LOUDLY on an empty measurement. A silently empty capture would
+          # otherwise be discovered only after all 153 runs were complete.
+          if [ ! -s results/eco-total.json ]; then
+            echo "::error::eco-total.json is EMPTY. ECO-CI wrote no measurement JSON - check that json-output:true is on the start-measurement step."
+            exit 1
+          fi
+
+          # The runner hardware must match the power model ECO-CI estimates with.
+          # GitHub's fleet is heterogeneous, so this is checked every run rather
+          # than assumed; a mismatch is a systematic bias in the ABSOLUTE energy
+          # figures (comparisons between configurations remain valid).
+          CPU="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+          case "$CPU" in
+            *7763*) echo "Power model MATCHES runner CPU ($CPU)." ;;
+            *) echo "::warning::Runner CPU is '$CPU' but ECO-CI estimates with the EPYC 7763 power model. Absolute Joules carry a systematic bias - record in threats-to-validity and stratify by cpu_model at analysis." ;;
+          esac
 
       - name: Upload results
         if: always()
