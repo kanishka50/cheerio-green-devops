@@ -1,0 +1,142 @@
+name: Pilot - Config A (Full)
+
+# ---------------------------------------------------------------------------
+# PILOT RUN - Green DevOps experiment (Phase 7)
+#
+# This is NOT data collection. Its only job is to answer the three questions
+# the subject-application research could not answer on paper:
+#   1. Is a single run 3-8 minutes on ubuntu-latest?
+#   2. How does energy/time split across the five stages?
+#   3. Are the tests deterministic (dispatch twice, compare)?
+#
+# Shape follows Config A (Full): Install -> Lint -> Test -> Build -> Deploy,
+# with NO dependency caching. That is the baseline arm of the experiment.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The subject application is HELD CONSTANT. Every run in the experiment must
+  # measure identical code, so the checkout is pinned to this commit and not to
+  # a moving branch. Do not change this once data collection begins.
+  SUBJECT_SHA: 402946f2127a21b2e5315dd340d176eeb328f085
+  # Deterministic environment (controls: timezone + locale).
+  TZ: UTC
+  LANG: C.UTF-8
+  FORCE_COLOR: '0'
+
+jobs:
+  full:
+    name: Config A - Full
+    runs-on: ubuntu-latest
+
+    steps:
+      # --- Control variables: logged every run so drift is visible ----------
+      - name: Log runner context
+        run: |
+          echo "=== RUNNER CONTEXT (control variables) ==="
+          echo "Image:    ${ImageOS:-unknown} / ${ImageVersion:-unknown}"
+          echo "CPU:      $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+          echo "Cores:    $(nproc)"
+          echo "Memory:   $(free -h | awk '/^Mem:/ {print $2}')"
+          echo "Kernel:   $(uname -r)"
+          echo "Timezone: $(date +%Z)"
+          echo "Started:  $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Clone repository (pinned commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SUBJECT_SHA }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          # NOTE: no `cache:` key here on purpose. Config A is the UNCACHED
+          # baseline; caching is the single variable that Config B adds.
+
+      - name: ECO-CI - start measurement
+        uses: green-coding-solutions/eco-ci-energy-estimation@v5
+        with:
+          task: start-measurement
+          send-data: false
+
+      # ================= STAGE 1: INSTALL =================
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ECO-CI - measure install
+        uses: green-coding-solutions/eco-ci-energy-estimation@v5
+        with:
+          task: get-measurement
+          label: install
+          send-data: false
+
+      # ================= STAGE 2: LINT =================
+      # `npm run lint`, NOT `npm test`. cheerio's `test` script is
+      # "npm run lint && npm run test:vi" - it chains lint INSIDE test, which
+      # would make Config C (lint removed) and Config E (lint parallel to test)
+      # impossible to express. The granular scripts keep the stages separable.
+      - name: Lint
+        run: npm run lint
+
+      - name: ECO-CI - measure lint
+        uses: green-coding-solutions/eco-ci-energy-estimation@v5
+        with:
+          task: get-measurement
+          label: lint
+          send-data: false
+
+      # ================= STAGE 3: TEST =================
+      - name: Test
+        run: npm run test:vi
+
+      - name: ECO-CI - measure test
+        uses: green-coding-solutions/eco-ci-energy-estimation@v5
+        with:
+          task: get-measurement
+          label: test
+          send-data: false
+
+      # ================= STAGE 4: BUILD =================
+      - name: Build
+        run: npm run build
+
+      - name: ECO-CI - measure build
+        uses: green-coding-solutions/eco-ci-energy-estimation@v5
+        with:
+          task: get-measurement
+          label: build
+          send-data: false
+
+      # ================= STAGE 5: DEPLOY =================
+      # cheerio is a library, so "deploy" is publication packaging rather than
+      # a server release. `npm pack` performs the real packaging work (prepack
+      # hooks, file selection, tarball creation) without publishing anything.
+      # This is a known scope limitation - record it in threats-to-validity.
+      - name: Deploy (publication packaging)
+        run: npm pack
+
+      - name: ECO-CI - measure deploy
+        uses: green-coding-solutions/eco-ci-energy-estimation@v5
+        with:
+          task: get-measurement
+          label: deploy
+          send-data: false
+
+      # ================= RESULTS =================
+      - name: ECO-CI - display results
+        uses: green-coding-solutions/eco-ci-energy-estimation@v5
+        with:
+          task: display-results
+          send-data: false
+
+      - name: Log finish time
+        if: always()
+        run: |
+          echo "Finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
