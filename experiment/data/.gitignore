@@ -1,0 +1,3 @@
+# Downloaded run artefacts - re-fetchable from GitHub, not source data.
+# The combined dataset (measurements-all.csv) IS kept: it is the replication package.
+raw/
