@@ -181,6 +181,14 @@ jobs:
           LAP_DEPLOY: ${{ steps.eco_deploy.outputs.data-lap-json }}
         run: |
           mkdir -p results
+          # ECO-CI's own working directory is the AUTHORITATIVE record. It holds
+          # metrics.txt (per-lap CPU%/energy/power/duration), energy-total.txt,
+          # timer-total.txt and the rendered table, and it is written on every
+          # run regardless of inputs. The step outputs below are captured as a
+          # convenience, but analysis parses this directory, because the
+          # data-total-json / data-lap-json outputs are not populated in v5.
+          cp -r /tmp/eco-ci results/eco-ci-raw 2>/dev/null \
+            || echo "WARNING: /tmp/eco-ci not present"
           printf '%s' "$ECO_TOTAL"   > results/eco-total.json
           printf '%s' "$LAP_INSTALL" > results/lap-install.json
           printf '%s' "$LAP_LINT"    > results/lap-lint.json
@@ -205,14 +213,15 @@ jobs:
           } > results/meta.json
           echo "=== meta.json ==="
           cat results/meta.json
-          echo "=== eco-total.json (first 600 chars) ==="
-          head -c 600 results/eco-total.json || true
-          echo
+          echo "=== files captured ==="
+          find results -type f | sort
+          echo "=== metrics.txt (the per-stage measurements) ==="
+          cat results/eco-ci-raw/metrics.txt 2>/dev/null || echo "(absent)"
 
           # Fail LOUDLY on an empty measurement. A silently empty capture would
-          # otherwise be discovered only after all 153 runs were complete.
-          if [ ! -s results/eco-total.json ]; then
-            echo "::error::eco-total.json is EMPTY. ECO-CI wrote no measurement JSON - check that json-output:true is on the start-measurement step."
+          # otherwise be discovered only after all 153 runs had been collected.
+          if [ ! -s results/eco-ci-raw/metrics.txt ]; then
+            echo "::error::No ECO-CI measurements captured (results/eco-ci-raw/metrics.txt missing or empty). Do not collect data until this is fixed."
             exit 1
           fi
 
