@@ -1,4 +1,4 @@
-name: Pilot - Config A (Full, uncached)
+name: Pilot - Config B (Full, cached)
 
 # ---------------------------------------------------------------------------
 # PILOT - Green DevOps experiment (Phase 7). NOT final data collection.
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  CONFIG_ID: 'A'
+  CONFIG_ID: 'B'
   # Upstream commit this fork was taken from, for the record. Re-pin the
   # checkout to a frozen SHA before final data collection begins.
   UPSTREAM_SHA: 402946f2127a21b2e5315dd340d176eeb328f085
@@ -30,7 +30,7 @@ env:
 
 jobs:
   run:
-    name: Config A - Full (uncached)
+    name: Config B - Full (cached)
     runs-on: ubuntu-latest
 
     steps:
@@ -61,7 +61,9 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-          # NO `cache:` key here. Config A is the UNCACHED baseline.
+          # THE SINGLE VARIABLE under test. Everything else in this file
+          # is byte-identical to Config A.
+          cache: 'npm'
       - name: ECO-CI - start measurement
         uses: green-coding-solutions/eco-ci-energy-estimation@v5
         with:
@@ -138,7 +140,7 @@ jobs:
       - name: Deploy (upload artefact)
         uses: actions/upload-artifact@v4
         with:
-          name: package-A-${{ github.run_id }}-${{ github.run_attempt }}
+          name: package-B-${{ github.run_id }}-${{ github.run_attempt }}
           path: '*.tgz'
           compression-level: 6
           retention-days: 1
@@ -183,7 +185,7 @@ jobs:
           printf '%s' "$LAP_DEPLOY"  > results/lap-deploy.json
           {
             echo '{'
-            echo '  "config": "A",'
+            echo '  "config": "B",'
             echo '  "run_id": "${{ github.run_id }}",'
             echo '  "run_number": "${{ github.run_number }}",'
             echo '  "run_attempt": "${{ github.run_attempt }}",'
@@ -207,7 +209,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: result-A-${{ github.run_id }}-${{ github.run_attempt }}
+          name: result-B-${{ github.run_id }}-${{ github.run_attempt }}
           path: results/
           retention-days: 30
           if-no-files-found: error
